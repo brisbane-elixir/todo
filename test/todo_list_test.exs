@@ -8,10 +8,9 @@ defmodule TodoListTest do
       TodoList.add_entry(%{date: {2013, 12, 20}, title: "Shopping"}) |>
       TodoList.add_entry(%{date: {2013, 12, 19}, title: "Movies"})
 
-    assert TodoList.entries(todo_list, {2013, 12, 19}) == [
-      %{date: {2013, 12, 19}, title: "Movies"},
-      %{date: {2013, 12, 19}, title: "Dentist"}
-    ]
+    entries = TodoList.entries(todo_list, {2013, 12, 19})
+    assert entries |> Enum.at(0) |> Map.take([:date, :title]) == %{date: {2013, 12, 19}, title: "Dentist"}
+    assert entries |> Enum.at(1) |> Map.take([:date, :title]) == %{date: {2013, 12, 19}, title: "Movies"}
     assert TodoList.entries(todo_list, {2013, 12, 18}) == []
   end
 end
