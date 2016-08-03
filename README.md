@@ -170,5 +170,67 @@ mix test
 ### Updating Entries
 Now that we can uniquely identify entries, we can implement update. Let's write a test:
 ```
+  test "should update an existing todo" do
+    todo_list = TodoList.new
+    |> TodoList.add_entry(%{date: {2016, 07, 19}, title: "Meetup"})
 
+    updated_list = todo_list |> TodoList.update_entry(1, &Map.put(&1, :title, "Elixir Meetup"))
+
+    assert updated_list |> TodoList.entries({2016, 07, 19}) == [
+     %{date: {2016, 07, 19}, id: 1, title: "Elixir Meetup"}
+    ]
+  end
+```
+We also want to check that we handle a case where we try update an entry that doesn't exist. We've decided that for now
+we just want to return the list unchanged rather than raise an exception.
+```
+  test "should return unchanged list when updating a non-existing entry" do
+    todo_list = TodoList.new
+    |> TodoList.add_entry(%{date: {2016, 07, 19}, title: "Meetup"})
+
+    updated_list = todo_list |> TodoList.update_entry(2, &Map.put(&1, :title, "Elixir Meetup"))
+
+    assert updated_list == todo_list
+  end
+```
+To make our tests pass, here's the `update_entry` implementation:
+```
+  def update_entry(
+        %TodoList{entries: entries} = todo_list,
+        entry_id,
+        updater_fun
+      ) do
+    case entries[entry_id] do
+      nil -> todo_list
+      old_entry ->
+        new_entry = updater_fun.(old_entry)
+        new_entries = Map.put(entries, new_entry.id, new_entry)
+        %TodoList{todo_list | entries: new_entries}
+    end
+  end
+```
+### Deleting an entry
+Our TodoList module is almost complete. All we're missing is a delete function.
+Here is a test for it:
+```
+  test "should delete an entry" do
+    todo_list = TodoList.new
+    |> TodoList.add_entry(%{date: {2016, 07, 19}, title: "Meetup"})
+
+    assert todo_list |> TodoList.entries({2016, 07, 19}) |> Enum.count == 1
+
+    todo_list = todo_list |> TodoList.delete_entry(1)
+
+    assert todo_list |> TodoList.entries({2016, 07, 19}) |> Enum.count == 0
+  end
+```
+And an implementation:
+```
+  def delete_entry(
+        %TodoList{entries: entries} = todo_list,
+        entry_id
+      ) do
+    new_entries = Map.delete(entries, entry_id)
+    %TodoList{todo_list | entries: new_entries}
+  end
 ```
