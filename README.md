@@ -140,11 +140,9 @@ function will need to change:
 ```
   def entries(%TodoList{entries: entries}, date) do
     entries
-    |> Stream.filter(fn({_, entry}) ->
+    |> Map.values
+    |> Enum.filter(fn entry ->
       entry.date == date
-    end)
-    |> Enum.map(fn({_, entry}) ->
-      entry
     end)
   end
 ```
@@ -152,19 +150,25 @@ We'll also need to update our tests, as we are adding an ID field to entries. We
 the fields we care about still.
 ```
   test "should add todos to a todo list" do
-    todo_list =
-      TodoList.new |>
-      TodoList.add_entry(%{date: {2013, 12, 19}, title: "Dentist"}) |>
-      TodoList.add_entry(%{date: {2013, 12, 20}, title: "Shopping"}) |>
-      TodoList.add_entry(%{date: {2013, 12, 19}, title: "Movies"})
+    todo_list = todolist.new
+    |> todolist.add_entry(%{date: {2013, 12, 19}, title: "dentist"})
+    |> todolist.add_entry(%{date: {2013, 12, 20}, title: "shopping"})
+    |> todolist.add_entry(%{date: {2013, 12, 19}, title: "movies"})
 
-    entries = TodoList.entries(todo_list, {2013, 12, 19})
-    assert entries |> Enum.at(0) |> Map.take([:date, :title]) == %{date: {2013, 12, 19}, title: "Dentist"}
-    assert entries |> Enum.at(1) |> Map.take([:date, :title]) == %{date: {2013, 12, 19}, title: "Movies"}
-    assert TodoList.entries(todo_list, {2013, 12, 18}) == []
+
+    assert todolist.entries(todo_list, {2013, 12, 19}) == [
+      %{date: {2013, 12, 19}, title: "dentist", id: 1},
+      %{date: {2013, 12, 19}, title: "movies", id: 3}
+    ]
+    assert todolist.entries(todo_list, {2013, 12, 18}) == []
   end
 ```
 Run our tests to prove things still work:
 ```
 mix test
+```
+### Updating Entries
+Now that we can uniquely identify entries, we can implement update. Let's write a test:
+```
+
 ```
