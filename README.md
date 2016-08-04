@@ -278,8 +278,8 @@ defmodule TodoServerTest do
       %{date: {2013, 12, 19}, title: "Movies"})
 
     assert TodoServer.entries(todo_server, {2013, 12, 19}) ==
-      [%{date: {2013, 12, 19}, id: 3, title: "Movies"},
-       %{date: {2013, 12, 19}, id: 1, title: "Dentist"}]
+      [%{date: {2013, 12, 19}, id: 1, title: "Dentist"},
+        %{date: {2013, 12, 19}, id: 3, title: "Movies"}]
   end
 end
 ```
@@ -331,3 +331,84 @@ Similarly, we can implement the entries function.
   end
 ```
 Notice how we have to wait for the response here to make this a synchronous call.
+## GenServer powered todo server
+So far we have a Todo server process that kind of works, but OTP ships with a
+much better support for generic server processes, called `gen_server` . In addition to
+being much more feature rich than ServerProcess , gen_server also handles various
+kinds of edge cases and is battle-tested in production in complex concurrent systems.
+
+Let's switch from our home-baked version to using GenServer.
+```
+defmodule TodoServer do
+  use GenServer
+
+  def start do
+    GenServer.start(__MODULE__, nil)
+  end
+
+  def init(_) do
+    {:ok, TodoList.new}
+  end
+
+  def handle_cast({:add_entry, new_entry}, todo_list) do
+    todo_list = TodoList.add_entry(todo_list, new_entry)
+    {:noreply, todo_list}
+  end
+
+  def handle_call({:entries, date}, _, todo_list) do
+    {:reply, TodoList.entries(todo_list, date), todo_list}
+  end
+
+  def add_entry(todo_server, new_entry) do
+    GenServer.cast(todo_server, {:add_entry, new_entry})
+  end
+
+  def entries(todo_server, date) do
+    GenServer.call(todo_server, {:entries, date})
+  end
+end
+```
+And a minor change to our test,
+```
+    todo_server = TodoServer.start
+```
+becomes
+```
+    {:ok, todo_server} = TodoServer.start
+```
+### Runtime considerations
+
+#### A process is a bottleneck
+Although multiple processes may run in parallel, a single process is always sequential—it either
+runs some code or waits for a message. If many processes send messages to a single
+process, then that single process can significantly affect overall throughput.
+
+#### Unlimited process mailboxes
+Theoretically, a process mailbox has an unlimited size. In practice, the mailbox size is
+limited by available memory. Thus, if a process constantly falls behind, meaning mes-
+sages arrive faster than the process can handle them, the mailbox will constantly grow
+and increasingly consume memory. Ultimately, a single slow process may cause an
+entire system to crash by consuming all the available memory.
+
+A more subtle version of the same problem occurs if a process doesn’t handle
+some messages at all - these are the kind of things GenServer handles for us beyond our 'home grown' server implementation.
+
+#### Shared nothing concurrency
+Processes share no memory. Thus, sending a message to
+another process results in a deep copy of the message contents.
+
+You may wonder about the purpose of shared nothing concurrency. First, it simpli-
+fies the code of each individual process. Because processes don’t share memory, you
+don’t need complicated synchronization mechanisms such as locks and mutexes.
+Another benefit is overall stability: one process can’t compromise the memory of
+another. This in turn promotes the integrity and fault-tolerance of the system. Finally,
+shared nothing concurrency makes it possible to implement an efficient garbage
+collector.
+
+And that completes our first steps with the Todo application. Let's recap what we've done:
+ - Built our todo list functional abstraction of data structures and functions
+ - Wrapped our todo list with todo server, which stores the state of the list in a process.
+ - Our server allows many clients to access a todo list asynchronously, all while maintaining our internal immutable representation.
+ - Used GenServer to abstract the details of implementing the server process.
+
+Next time we'll go further into buiding our concurrent system around these simple beginnings.
