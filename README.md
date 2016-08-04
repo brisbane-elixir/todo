@@ -234,3 +234,100 @@ And an implementation:
     %TodoList{todo_list | entries: new_entries}
   end
 ```
+## Server Processes
+### Todo generic server process
+Our TodoList so far is a pure functional abstraction. To keep the structure alive,
+we constantly must hold on to the result of the last operation performed on the
+structure.
+In this example, you’ll build a TodoServer module that keeps this abstraction in
+the private state. Let’s see how the server is used:
+```
+iex(1)> todo_server = TodoServer.start
+iex(2)> TodoServer.add_entry(todo_server,
+%{date: {2013, 12, 19}, title: "Dentist"})
+iex(3)> TodoServer.add_entry(todo_server,
+%{date: {2013, 12, 20}, title: "Shopping"})
+iex(4)> TodoServer.add_entry(todo_server,
+%{date: {2013, 12, 19}, title: "Movies"})
+iex(5)> TodoServer.entries(todo_server, {2013, 12, 19})
+[%{date: {2013, 12, 19}, id: 3, title: "Movies"},
+%{date: {2013, 12, 19}, id: 1, title: "Dentist"}]
+```
+You start the server and then use its pid to manipulate the data. In contrast to the pure
+functional approach, you don’t need to take the result of a modification and feed it as
+an argument to the next operation. Instead, you constantly use the same todo_server
+variable to manipulate the to-do list.
+
+Let's start a new file in our project, `lib/todo_server.ex`, and a test `test/todo_server_test.ex`.
+We'll implement a server process ourselves, to get an understanding of how this works. Later, we'll reimplement
+it using GenServer, which will handle some of these details for us and much more. Understanding what happens
+underneath is really important though.
+
+First, I'll transcribe the above sample into a test:
+```
+defmodule TodoServerTest do
+  use ExUnit.Case
+
+  test "should add entries to a todo server" do
+    todo_server = TodoServer.start
+    TodoServer.add_entry(todo_server,
+      %{date: {2013, 12, 19}, title: "Dentist"})
+    TodoServer.add_entry(todo_server,
+      %{date: {2013, 12, 20}, title: "Shopping"})
+    TodoServer.add_entry(todo_server,
+      %{date: {2013, 12, 19}, title: "Movies"})
+
+    assert TodoServer.entries(todo_server, {2013, 12, 19}) ==
+      [%{date: {2013, 12, 19}, id: 3, title: "Movies"},
+       %{date: {2013, 12, 19}, id: 1, title: "Dentist"}]
+  end
+end
+```
+And we'll set up the basic structure of a server process:
+```
+defmodule TodoServer do
+  def start do
+    spawn(fn -> loop(TodoList.new) end)
+  end
+
+  defp loop(todo_list) do
+    new_todo_list = receive do
+      message ->
+        process_message(todo_list, message)
+    end
+    loop(new_todo_list)
+  end
+end
+```
+And add functions for `process_message` and `add_entry`:
+```
+  def add_entry(todo_server, new_entry) do
+    send(todo_server, {:add_entry, new_entry})
+  end
+
+  defp process_message(todo_list, {:add_entry, new_entry}) do
+    TodoList.add_entry(todo_list, new_entry)
+  end
+```
+The interface function sends the new entry data to the server. Recall that the loop
+function calls `process_message/2` , and the call ends up in the `process_message/2`
+clause. Here, you delegate to the TodoList function and return the modified Todo-
+List instance. This returned instance is used as the new server’s state.
+
+Similarly, we can implement the entries function.
+```
+  def entries(todo_server, date) do
+    send(todo_server, {:entries, self, date})
+    receive do
+      {:todo_entries, entries} -> entries
+    after 5000 ->
+        {:error, :timeout}
+    end
+  end
+
+  defp process_message(todo_list, {:entries, caller, date}) do
+    send(caller, {:todo_entries, TodoList.entries(todo_list, date)})
+    todo_list
+  end
+```
+Notice how we have to wait for the response here to make this a synchronous call.
