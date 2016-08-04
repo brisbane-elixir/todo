@@ -2,6 +2,12 @@
 
 ## Elixir News
  - Announcing GenStage http://elixir-lang.org/blog/2016/07/14/announcing-genstage/
+ - Elixir 1.3 released http://elixir-lang.org/blog/2016/06/21/elixir-v1-3-0-released/
+   - Calendar types and sigils
+   - Access selectors
+   - mix xref
+   - mix test --stale
+   - more stuff
 
 ## Recap - Concurrency
 https://gist.github.com/colinbankier/a3f2eb7642b94c0d610a
