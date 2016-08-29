@@ -87,7 +87,8 @@ And that pids we get back are Todo servers we can manipulate:
 And ensure everything still passes.
 
 Just for fun, let's prove that we can create a lot todo list processes without breaking a sweat. In iex, let's do:
-```
+
+```elixir
 {:ok, cache} = TodoCache.start
 length(:erlang.processes)
 1..100_000 |>
@@ -98,3 +99,17 @@ length(:erlang.processes)
 ```
 
 ## Analysing process dependencies 
+Let's take a look at our system so far. Our goal is for this system to be used in a HTTP server - which typically use a process per client request in the erlang/elixir world. If we have many concurrent users, we can expect many processes to be accessing our Todo Cache and Todo Server processes.
+
+![Process dependencies](./elixir_in_action_images/todo-server-processes.png)
+
+In this image, each box represents a process. You can see:
+ - multiple client processes access a single Todo Cache
+ - multiple client processes use multiple Todo Server processes 
+ 
+This first property could be the source of a bottleneck - we can only handle one `server_process` request simultaneously, no matter
+how many CPUs we have. This may not be significant in practice, but is a good consideration to be aware of. Given our Cache performs a simple `Map` lookup or insert, and we need a consistent state of existing todo lists, we'll accept this trade-off for our initial attempt.
+
+## Persisting Data
+
+
