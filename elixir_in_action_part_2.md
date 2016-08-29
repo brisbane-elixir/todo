@@ -62,3 +62,39 @@ defmodule TodoCache do
   end
 end
 ```
+
+We'll also ensure we can start multiple todo server processes:
+```
+  test "can start multiple server processes" do
+    {:ok, cache} = TodoCache.start
+    pid_1 = TodoCache.server_process(cache, "Bob's List")
+    pid_2 = TodoCache.server_process(cache, "Alice's List")
+
+    assert pid_1 != pid_2
+  end
+```
+And that pids we get back are Todo servers we can manipulate:
+```
+  test "returned pid is a todo list" do
+    {:ok, cache} = todocache.start
+    bobs_list = todocache.server_process(cache, "bob's list")
+    entry = %{date: {2016, 10, 01}, title: "dentist"}
+    todoserver.add_entry(bobs_list, entry)
+
+    assert todoserver.entries(bobs_list, {2016, 10, 01}) == [map.put(entry, :id, 1)]
+  end
+```
+And ensure everything still passes.
+
+Just for fun, let's prove that we can create a lot todo list processes without breaking a sweat. In iex, let's do:
+```
+{:ok, cache} = TodoCache.start
+length(:erlang.processes)
+1..100_000 |>
+  Enum.each(fn(index) ->
+    TodoCache.server_process(cache, "to-do list #{index}")
+  end)
+length(:erlang.processes)
+```
+
+## Analysing process dependencies 
