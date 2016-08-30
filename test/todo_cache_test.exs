@@ -18,11 +18,11 @@ defmodule TodoCacheTest do
   end
 
   test "returned pid is a todo list" do
-    {:ok, cache} = todocache.start
-    bobs_list = todocache.server_process(cache, "bob's list")
+    {:ok, cache} = TodoCache.start
+    bobs_list = TodoCache.server_process(cache, "bob's list")
     entry = %{date: {2016, 10, 01}, title: "dentist"}
-    todoserver.add_entry(bobs_list, entry)
+    TodoServer.add_entry(bobs_list, entry)
 
-    assert todoserver.entries(bobs_list, {2016, 10, 01}) == [map.put(entry, :id, 1)]
+    assert TodoServer.entries(bobs_list, {2016, 10, 01}) == [Map.put(entry, :id, 1)]
   end
 end

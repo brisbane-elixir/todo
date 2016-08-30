@@ -112,4 +112,34 @@ how many CPUs we have. This may not be significant in practice, but is a good co
 
 ## Persisting Data
 
+So far, our data is only in memory. If we shut down our process, or our server dies, we have lost our users Todo lists.
+Let's do some persistence. To keep things simple, we're just going to write it locally to disk. Obviously, if we're running multiple
+servers in production, writing locally to disk isn't going to cut it, but it serves our purpose for exploring processes right now.
+
+So, we'll introduce a `Database` service, that has `store` and `get` functions. Here is a test:
+In `test/database_test.exs`:
+
+```elixir
+defmodule DatabaseTest do
+  use ExUnit.Case
+
+  test "can store and retrieve values" do
+    TodoDatabase.start("database/test")
+    TodoDatabase.store("my key", %{this_is: "anything"})
+
+    assert TodoDatabase.get("my key") == %{this_is: "anything"}
+  end
+end
+```
+
+Simple, but enough for now. Perhaps we could do more to ensure it is actually peristed to disk, e.g. kill the process then try
+our `get`. We'll do that in the next test, which tests a Todo Server persists its data.
+
+In `tests/todo_server_test.exs`:
+
+```
+
+```
+
+
 
