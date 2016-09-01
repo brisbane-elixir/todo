@@ -1,8 +1,15 @@
 defmodule TodoServerTest do
   use ExUnit.Case
 
-  test "should add entries to a todo server" do
-    {:ok, todo_server} = TodoServer.start
+  setup do
+    TodoDatabase.start("./database/test")
+    {:ok, todo_server} = TodoServer.start("myserver")
+    :ok = TodoServer.clear(todo_server)
+
+    %{todo_server: todo_server}
+  end
+
+  test "should add entries to a todo server", %{todo_server: todo_server} do
     TodoServer.add_entry(todo_server,
       %{date: {2013, 12, 19}, title: "Dentist"})
     TodoServer.add_entry(todo_server,
@@ -13,5 +20,19 @@ defmodule TodoServerTest do
     assert TodoServer.entries(todo_server, {2013, 12, 19}) ==
       [%{date: {2013, 12, 19}, id: 1, title: "Dentist"},
         %{date: {2013, 12, 19}, id: 3, title: "Movies"}]
+  end
+
+  test "should persist entries", %{todo_server: todo_server} do
+    TodoServer.add_entry(todo_server,
+      %{date: {2016, 9, 22}, title: "Elixir Meetup"})
+
+    :timer.sleep(500)
+    Process.exit(todo_server, :kill)
+
+    {:ok, todo_server2} = TodoServer.start("myserver")
+
+    assert todo_server != todo_server2
+    assert TodoServer.entries(todo_server2, {2016,9,22}) ==
+      [%{id: 1, date: {2016, 9, 22}, title: "Elixir Meetup"}]
   end
 end

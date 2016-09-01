@@ -135,11 +135,95 @@ end
 Simple, but enough for now. Perhaps we could do more to ensure it is actually peristed to disk, e.g. kill the process then try
 our `get`. We'll do that in the next test, which tests a Todo Server persists its data.
 
-In `tests/todo_server_test.exs`:
+In `test/todo_server_test.exs`:
 
+```elixir
+  test "should persist entries", %{todo_server: todo_server} do
+    TodoServer.add_entry(todo_server,
+      %{date: {2016, 9, 22}, title: "Elixir Meetup"})
+
+    :timer.sleep(500)
+    Process.exit(todo_server, :kill)
+
+    {:ok, todo_server2} = TodoServer.start("myserver")
+
+    assert todo_server != todo_server2
+    assert TodoServer.entries(todo_server2, {2016,9,22}) ==
+      [%{id: 1, date: {2016, 9, 22}, title: "Elixir Meetup"}]
+  end
+```
+You'll notice I now expect some context passed in to my test, I added a `setup` to remove some duplication with the
+existing test:
+```elixir
+  setup do
+    TodoDatabase.start("./database/test")
+    {:ok, todo_server} = TodoServer.start("myserver")
+    :ok = TodoServer.clear(todo_server)
+
+    %{todo_server: todo_server}
+  end
+```
+First, our server expects the database process to be started. We'll look at better ways to do this when we look at supervision,
+but for now, it'll suffice to start it directly whereever convenient.
+
+Second, we've added a parameter to `TodoServer.start`, so that it has a name it can use to persist the data under. Update the existing test use the context from the setup too.
+
+You'll notice a `:timer.sleep` call in there. Why is it there? Because our `add_entry` call is asynchronous, if we put that
+message in the mailbox of the TodoServer, and immediately kill it, it may never be processed. For the purposes of this test, we want
+to ensure the entry is written to disk, to that when we start another server with the same name, we can check it has read it.
+
+Further to this, in order to have reproducable tests, we needed a way to clear our database. Otherwise, a second test run would append to our existing entry list, and it would contain more entries than we expect.
+
+To implement the clear functionality, this is what I added to TodoServer:
+In `lib/todo_server.ex`:
+```elixir
+  def handle_call(:clear, _, {name, todo_list}) do
+    todo_list = TodoList.new
+    TodoDatabase.store(name, todo_list)
+    {:reply, :ok, {name, todo_list}}
+  end
+
+  def clear(todo_server) do
+    GenServer.call(todo_server, :clear)
+  end
 ```
 
+If we run our tests now, we'll find there are a few things we need to fix. Here are some things to change in `TodoServer`:
+
+Use the new parameter to persist the data on an `add_entry` call.
+
+```elixir
+  def handle_cast({:add_entry, new_entry}, {name, todo_list}) do
+    todo_list = TodoList.add_entry(todo_list, new_entry)
+    TodoDatabase.store(name, todo_list)
+    {:noreply, {name, todo_list}}
+  end
 ```
 
+Notice, we now pass arount a tuple of `{name, todo_list}` to keep the name around. We'll need to update other functions in this
+module to do this too.
+
+The `init` function also reads the database to get existing state from disk. If none exists, it starts a new list:
+
+```elixir
+  def init(name) do
+    {:ok, {name, TodoDatabase.get(name) || TodoList.new}}
+  end
+```
+
+You'll also find that the `TodoCache` test is failing, because the `TodoServer` expects the database to already have been started.
+For now, we'll add a very hacky solution of starting the database when the cache starts, in it's `init` function:
+
+In `lib/todo_cache.ex`:
+
+```elixir
+  def init(_) do
+    TodoDatabase.start("./database")
+    {:ok, Map.new}
+  end
+```
+There are obvious problems with this approach...but let's roll with it for now. We'll make it better later. All the existing tests should be able to pass from there, and we should see some data persisted to disk.
+
+Alright! We have persistence! Our implementation so far is shaky at best...but we'll learn some ways to tighen this up next.
 
 

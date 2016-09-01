@@ -2,6 +2,7 @@ defmodule TodoCache do
   use GenServer
 
   def init(_) do
+    TodoDatabase.start("./database")
     {:ok, Map.new}
   end
 
@@ -18,7 +19,7 @@ defmodule TodoCache do
       {:ok, todo_server} ->
         {:reply, todo_server, todo_servers}
       :error ->
-        {:ok, new_server} = TodoServer.start
+        {:ok, new_server} = TodoServer.start(todo_list_name)
         {
           :reply,
           new_server,
