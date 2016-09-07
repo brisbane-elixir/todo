@@ -20,6 +20,7 @@ defmodule TodoCacheTest do
   test "returned pid is a todo list" do
     {:ok, cache} = TodoCache.start
     bobs_list = TodoCache.server_process(cache, "bob's list")
+    TodoServer.clear(bobs_list)
     entry = %{date: {2016, 10, 01}, title: "dentist"}
     TodoServer.add_entry(bobs_list, entry)
 

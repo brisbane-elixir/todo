@@ -188,6 +188,8 @@ In `lib/todo_server.ex`:
   end
 ```
 
+I also add a `TodoServer.clear` call in the `TodoCacheTest`, which otherwise will keep appending to a list every run.
+
 If we run our tests now, we'll find there are a few things we need to fix. Here are some things to change in `TodoServer`:
 
 Use the new parameter to persist the data on an `add_entry` call.
@@ -226,4 +228,50 @@ There are obvious problems with this approach...but let's roll with it for now. 
 
 Alright! We have persistence! Our implementation so far is shaky at best...but we'll learn some ways to tighen this up next.
 
+## Analysing the system
+
+Let's have another think about how our processes are working together in our system. We introduced just one database process, but it 
+can have a negative impact on our whole systems performance. Our database process performs term encoding/decoding, not to mention
+filesystem access.
+
+![Process dependencies](./elixir_in_action_images/todo-server-processes-2.png)
+
+Let's look at where we call our database process:
+ - In `TodoServer.init`, we do `TodoDatabase.get` to load state from disk.
+ - In the `handle_cast` for `TodoServer.add_entry`, we do a `TodoDatabase.store`.
+ 
+The `store` call might seem harmless, since it's in an asynchronous cast. A client issues the request and continues on it's merry
+way without blocking. However, if requests arrive faster than they can be handled, the message queue for the Database will grow until
+eventually we run out of memory and possibly crash the BEAM.
+
+The `get` call is also problematic. It's synchronous, so the `TodoServer` waits for the response. While it's waiting, that `TodoServer`
+can't handle new messages. What is worse, however, is that because this is happening inside `init`, our single `TodoCache` process
+is blocked while the filesystem is read. Under a heavier load, this could render our system useless.
+
+## Addressing the bottleneck
+
+What can we do? Obviously we need to address the bottleneck caused by our singleton database process.
+
+### Bypass the process
+Does this need to be a process, or can it be a plain module? Here are some reasons for a dedicated server process. 
+ - Must manage some long lived state
+ - Manages a resource that must be reused, e.g. a TCP connection, database connection, file handle, pipe to an OS process.
+ - Syncronise a critical section of code - only one process can run some code at a time.
+ 
+ Our database must be synchronised on individual items - we can't simultaneously write to the same file from multiple processes.
+ 
+### Handle requests conccurrently
+Another option is to keep the Database process, but it spawn child processes for any actions, so each action is run concurrently.
+This would help our Database process remain responsive, and would be valid for certain scenarios. For ours, however, it doesn't prevent
+concurrent read/writes to the same file, and concurrently is unbounded. If we have 100,000 concurrent requests, we'll have 100,000 concurrent filesystem operations, which could bring down the performance of the whole system.
+
+### Limiting concurrency with pooling
+A common solution to this is to introduce pooling. Our database would start a set number of workers and delegate all requests to a worker.
+This allows our Database process to remain responsive, while keeping concurrency under control. It also allows us to send actions for
+the same item to the same worker, forcing those to be synchronised, yet allowing concurrent operations.
+
+_note:_ In real life, you would need to constrain the number of simultaneous operations sent to a database, this is purpose of pooling.
+There are great existing libraries in elixir/erlang (e.g. poolboy), and you don't need to write this yourself.
+
+## Database Pooling
 
