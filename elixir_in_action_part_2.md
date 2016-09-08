@@ -274,4 +274,9 @@ _note:_ In real life, you would need to constrain the number of simultaneous ope
 There are great existing libraries in elixir/erlang (e.g. poolboy), and you don't need to write this yourself.
 
 ## Database Pooling
+ - Introduce `TodoDatabaseWorker`, similar to existing `TodoDatabase` but not registered under global alias.
+ - During `TodoDatabase` initialisation, start N workers, store their pids in a Map.
+ - `TodoDatabase.get_worker` returns a pid for a given key. Use `:erlang.phash2(key, n)` to calculate numberical hash
+ and normalise to relevant range.
+ - `store` and `get` of `TodoDatabase` obtain a workers `pid` and forward to interface functions of `DatabaseWorker`
 

@@ -1,5 +1,8 @@
 defmodule Todo.Database do
   use GenServer
+  alias Todo.DatabaseWorker
+
+  @num_workers 10
 
   def start(db_folder) do
     GenServer.start(__MODULE__, db_folder,
@@ -8,35 +11,31 @@ defmodule Todo.Database do
   end
 
   def store(key, data) do
-    GenServer.cast(:database_server, {:store, key, data})
+    DatabaseWorker.store(get_worker(key), key, data)
   end
 
   def get(key) do
-    GenServer.call(:database_server, {:get, key})
+    DatabaseWorker.get(get_worker(key), key)
   end
 
-  def get_worker(name) do
-    :ok
+  def get_worker(key) do
+    GenServer.call(:database_server, {:get_worker, key})
   end
 
   def init(db_folder) do
     File.mkdir_p(db_folder)
-    {:ok, db_folder}
+    worker_pids = Enum.reduce(0..@num_workers, %{}, fn index, map ->
+      {:ok, pid} = DatabaseWorker.start(db_folder)
+      Map.put(map, index, pid)
+    end)
+
+    {:ok, worker_pids}
   end
 
-  def handle_cast({:store, key, data}, db_folder) do
-    file_name(db_folder, key)
-    |> File.write!(:erlang.term_to_binary(data))
-    {:noreply, db_folder}
+  def handle_call({:get_worker, key}, _, worker_pids) do
+    index = :erlang.phash2(key, @num_workers)
+    pid = Map.get(worker_pids, index)
+    {:reply, pid, worker_pids}
   end
 
-  def handle_call({:get, key}, _, db_folder) do
-    data = case File.read(file_name(db_folder, key)) do
-             {:ok, contents} -> :erlang.binary_to_term(contents)
-             _ -> nil
-           end
-    {:reply, data, db_folder}
-  end
-
-  defp file_name(db_folder, key), do: "#{db_folder}/#{key}"
 end
