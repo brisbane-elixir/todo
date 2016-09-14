@@ -274,9 +274,126 @@ _note:_ In real life, you would need to constrain the number of simultaneous ope
 There are great existing libraries in elixir/erlang (e.g. poolboy), and you don't need to write this yourself.
 
 ## Database Pooling
+To introduce database pooling, here are the steps we'll take:
  - Introduce `TodoDatabaseWorker`, similar to existing `TodoDatabase` but not registered under global alias.
  - During `TodoDatabase` initialisation, start N workers, store their pids in a Map.
  - `TodoDatabase.get_worker` returns a pid for a given key. Use `:erlang.phash2(key, n)` to calculate numberical hash
  and normalise to relevant range.
  - `store` and `get` of `TodoDatabase` obtain a workers `pid` and forward to interface functions of `DatabaseWorker`
+ 
+ First, I'll write a test for our database worker. It's similar to our existing database module, but expects a `pid` to be passed
+ to it's functions, since we have more than one.
+
+```elixir
+defmodule Todo.DatabaseWorkerTest do
+  use ExUnit.Case
+  alias Todo.DatabaseWorker
+
+  test "can store and retrieve values" do
+    {:ok, pid} = DatabaseWorker.start("database/test")
+    DatabaseWorker.store(pid, "my key", %{this_is: "anything"})
+
+    assert DatabaseWorker.get(pid, "my key") == %{this_is: "anything"}
+  end
+end
+```
+
+Here is our implemention, again similar to our existing database, but the worker keeps it's `db_folder` as it's state.
+We expect each worker to have a unique folder, so each worker has exclusive access to that directory.
+
+```elixir
+defmodule Todo.DatabaseWorker do
+  use GenServer
+
+  def start(db_folder) do
+    GenServer.start(__MODULE__, db_folder)
+  end
+
+  def store(pid, key, data) do
+    GenServer.cast(pid, {:store, key, data})
+  end
+
+  def get(pid, key) do
+    GenServer.call(pid, {:get, key})
+  end
+
+  def init(db_folder) do
+    File.mkdir_p(db_folder)
+    {:ok, db_folder}
+  end
+
+  def handle_cast({:store, key, data}, db_folder) do
+    file_name(db_folder, key)
+    |> File.write!(:erlang.term_to_binary(data))
+    {:noreply, db_folder}
+  end
+
+  def handle_call({:get, key}, _, db_folder) do
+    data = case File.read(file_name(db_folder, key)) do
+             {:ok, contents} -> :erlang.binary_to_term(contents)
+             _ -> nil
+           end
+    {:reply, data, db_folder}
+  end
+
+  defp file_name(db_folder, key), do: "#{db_folder}/#{key}"
+end
+``` 
+
+Here is our updated `Database` module, which now uses `DatabaseWorker`.
+
+We alias our worker module, set a number of workers. Obviously a future enhancement could make this configurable,
+but for now this will do.
+
+Our init function now spawns our database workers, passing in the base directory. The state maintained
+by the Database process is now a Map of database worker pids.
+
+We'll add `get_worker` interface function and callback to return a worker pid for a given key. 
+
+Our `get` and `store` functions now just delegate to our worker processes, using `get_worker` to look one up.
+
+```elixir
+defmodule Todo.Database do
+  use GenServer
+  alias Todo.DatabaseWorker
+
+  @num_workers 10
+
+  def start(db_folder) do
+    GenServer.start(__MODULE__, db_folder,
+      name: :database_server
+    )
+  end
+
+  def store(key, data) do
+    DatabaseWorker.store(get_worker(key), key, data)
+  end
+
+  def get(key) do
+    DatabaseWorker.get(get_worker(key), key)
+  end
+
+  def get_worker(key) do
+    GenServer.call(:database_server, {:get_worker, key})
+  end
+
+  def init(db_folder) do
+    File.mkdir_p(db_folder)
+    worker_pids = Enum.reduce(0..@num_workers, %{}, fn index, map ->
+      {:ok, pid} = DatabaseWorker.start(db_folder)
+      Map.put(map, index, pid)
+    end)
+
+    {:ok, worker_pids}
+  end
+
+  def handle_call({:get_worker, key}, _, worker_pids) do
+    index = :erlang.phash2(key, @num_workers)
+    pid = Map.get(worker_pids, index)
+    {:reply, pid, worker_pids}
+  end
+
+end
+```
+
 
