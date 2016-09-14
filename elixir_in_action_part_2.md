@@ -396,4 +396,63 @@ defmodule Todo.Database do
 end
 ```
 
+## Fault Tolerance
+
+We've previously talked about erlang's "let it crash" philosophy. The basic idea is that rather than try to predict and
+explicity handle every failure scenario, we can build much more resilient systems by instead building in the ability
+to self-heal from any expected scenario. Rather than allow our whole system to crash, we can allow the single process or part our
+system with the failure to crash and be restarted automatically in a clean state.
+
+There are a few problems with our system in terms of resilience at the moment. Let's break it in iex:
+```elixir
+alias Todo.{Cache, Server}
+{:ok, cache} = Cache.start
+bobs_list = Cache.server_process(cache, "bob's list")
+Server.entries(bobs_list, {2016, 10, 01})
+
+Process.exit(bobs_list, :kill)
+Server.entries(bobs_list, {2016, 10, 01})
+
+bobs_list = Cache.server_process(cache, "bob's list")
+Server.entries(bobs_list, {2016, 10, 01})
+```
+
+First, we get a list process as normal, and check it's entries. Then, we kill it, to pretend it dies somehow. In
+reality, this might be for any reason, an exception was thrown, and the process crashed. If we try use bob's list 
+hereafter, it fails. Even worse, trying to get bob's list from the cache again gives us the same stale pid, so we
+are totally unable to use bob's list. 
+
+Similarly, if our cache process dies, no new clients can get any Todo lists to work with at all:
+```elxiir
+alias Todo.{Cache, Server}
+{:ok, cache} = Cache.start
+bobs_list = Cache.server_process(cache, "bob's list")
+
+Process.exit(cache, :kill)
+
+anns_list = Cache.server_process(cache, "ann's list")
+```
+Let's fix this with a supervisor.
+
+## Adding a supervisor
+We'll add a supervisor to the Todo Cache first - since it is currently the entry point to our system. There are a few minor changes
+required.
+
+Supervisors use links to manage child processes, so we need to provide a `start_link` instead of our `start` function.
+We'll also register it under a global alias, since we want to only have one cache. This allows callers not to have to
+pass the pid in for the process.
+```elixir
+  def start_link do
+    IO.puts "Starting to-do cache."
+    GenServer.start_link(__MODULE__, nil, name: :todo_cache)
+  end
+
+  def server_process(todo_list_name) do
+    GenServer.call(:todo_cache, {:server_process, todo_list_name})
+  end
+```
+
+
+
+
 
