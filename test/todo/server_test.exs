@@ -3,7 +3,7 @@ defmodule Todo.ServerTest do
   alias Todo.{Server, Database}
 
   setup do
-    Database.start("./database/test")
+    Database.start_link("./database/test")
     {:ok, todo_server} = Server.start("myserver")
     :ok = Server.clear(todo_server)
 

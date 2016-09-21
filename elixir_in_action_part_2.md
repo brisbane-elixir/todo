@@ -453,6 +453,95 @@ pass the pid in for the process.
 ```
 
 
+we can now add our supervisor. Elixir provides a helper in the form of the `Supervisor` module. To define a supervisor,
+you must define an `init/1` function that return a 'specification' - a description of the child processes to be started
+and supervised. Let's see it in code.
+
+`/lib/todo/supervisor.ex`
+```elixir
+defmodule Todo.Supervisor do
+  use Supervisor
+
+  def start_link do
+    Supervisor.start_link(__MODULE__, nil)
+  end
+
+  def init(_) do
+    processes = [worker(Todo.Cache, [])]
+    supervise(processes, strategy: :one_for_one)
+  end
+end
+```
+
+The result of this function is a tuple that describes the supervisor. Note the `strategy: :one_for_one`, this is known as a
+restart strategy. This strategy means "If a child crashes, start another one.". There a few others, e.g. "Restart all children
+when a single child crashes.". We'll look at these later.
+
+Let's try our supervisor in iex.
+```elixir
+Todo.Supervisor.start_link
+ #-> Starting to-do cache.
+ #-> {:ok, #PID<0.157.0>}
+
+Process.whereis(:todo_cache) |> Process.exit(:kill)
+ #-> Starting to-do cache.
+ #-> true
+
+Process.whereis :todo_cache
+ #-> #PID<0.173.0>
+
+bobs_list = Todo.Cache.server_process("Bob's list")
+ #-> #PID<0.177.0>
+```
+
+One thing to note is the reason we regisistered our cache under a local alias, is to allow process discovery. You can see that
+a supervised process may be restarted, in which case it will have a different pid. Registering the process allows any
+clients to look up the current pid for that process.
+
+## Linking all processes
+
+Another thing to note from our supervisor example, is that terminating our cache process leaves it's children dangling. This is a 
+potential source of resource/memory leaks. Let's try it.
+
+```elixir 
+length(:erlang.processes)
+ # 88
+
+Process.whereis(:todo_cache) |> Process.exit(:kill)
+ # Starting to-do cache.
+ # true
+
+bobs_list = Todo.Cache.server_process("Bob's list")
+ # #PID<0.191.0>
+ 
+length(:erlang.processes)
+ # 89
+
+Process.whereis(:todo_cache) |> Process.exit(:kill)
+ # Starting to-do cache.
+ # true
+
+bobs_list = Todo.Cache.server_process("Bob's list")
+ # #PID<0.196.0>
+
+length(:erlang.processes)
+ # 90
+```
+
+Every time we kill the cache and access bob's list, a new instance in created, because our new cache has no reference to the
+old bob's list. Terminating a todo cache destroys it's state, so we should also take down all existing todo servers, so we can unsure
+clean termination. To do this, each server process must be linked to the cache. We'll also link the database server to the cache, and
+the database workers to the server. This is the primary way to ensure process consistency - by linking a group of processes, we
+ensure the crash of a process takes down it's dependencies as well. Regardless which process crashed, our entire structure will
+be restarted in a clean state.
+
+The downside of this is that an error in one process has a wide impact - an error in one database worker will bring down the entire
+structure. This is far from perfect, but let's roll with it for now. We'll improve this later.
+
+To make this change, we simply change `start` to `start_link` for all our processes. Let's do that, and try our previous example again.
+Note, for `Todo.Server`, I kept both `start` and `start_link`, as we have an existing test that starts and kills a server process.
+If `start_link` is used, it brings down the test process too! This obviously cuases the test to fail.
+
 
 
 

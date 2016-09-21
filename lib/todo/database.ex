@@ -4,8 +4,8 @@ defmodule Todo.Database do
 
   @num_workers 10
 
-  def start(db_folder) do
-    GenServer.start(__MODULE__, db_folder,
+  def start_link(db_folder) do
+    GenServer.start_link(__MODULE__, db_folder,
       name: :database_server
     )
   end
@@ -25,7 +25,7 @@ defmodule Todo.Database do
   def init(db_folder) do
     File.mkdir_p(db_folder)
     worker_pids = Enum.reduce(0..@num_workers, %{}, fn index, map ->
-      {:ok, pid} = DatabaseWorker.start(db_folder)
+      {:ok, pid} = DatabaseWorker.start_link(db_folder)
       Map.put(map, index, pid)
     end)
 

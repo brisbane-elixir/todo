@@ -2,6 +2,10 @@ defmodule Todo.Server do
   use GenServer
   alias Todo.{Database, List}
 
+  def start_link(name) do
+    GenServer.start_link(__MODULE__, name)
+  end
+
   def start(name) do
     GenServer.start(__MODULE__, name)
   end

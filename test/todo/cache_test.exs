@@ -3,24 +3,24 @@ defmodule Todo.CacheTest do
   alias Todo.{Cache, Server}
 
   test "can retrieve a server process from the cache" do
-    {:ok, cache} = Cache.start
-    pid = Cache.server_process(cache, "Bob's List")
-    retrieved = Cache.server_process(cache, "Bob's List")
+    {:ok, cache} = Cache.start_link
+    pid = Cache.server_process("Bob's List")
+    retrieved = Cache.server_process("Bob's List")
 
     assert pid == retrieved
   end
 
   test "can start multiple server processes" do
-    {:ok, cache} = Cache.start
-    pid_1 = Cache.server_process(cache, "Bob's List")
-    pid_2 = Cache.server_process(cache, "Alice's List")
+    {:ok, cache} = Cache.start_link
+    pid_1 = Cache.server_process("Bob's List")
+    pid_2 = Cache.server_process("Alice's List")
 
     assert pid_1 != pid_2
   end
 
   test "returned pid is a todo list" do
-    {:ok, cache} = Cache.start
-    bobs_list = Cache.server_process(cache, "bob's list")
+    {:ok, cache} = Cache.start_link
+    bobs_list = Cache.server_process("bob's list")
     Server.clear(bobs_list)
     entry = %{date: {2016, 10, 01}, title: "dentist"}
     Server.add_entry(bobs_list, entry)

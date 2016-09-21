@@ -3,7 +3,7 @@ defmodule Todo.Cache do
   alias Todo.{Database, Server}
 
   def init(_) do
-    Database.start("./database")
+    Database.start_link("./database")
     {:ok, Map.new}
   end
 
@@ -21,7 +21,7 @@ defmodule Todo.Cache do
       {:ok, todo_server} ->
         {:reply, todo_server, todo_servers}
       :error ->
-        {:ok, new_server} = Server.start(todo_list_name)
+        {:ok, new_server} = Server.start_link(todo_list_name)
         {
           :reply,
           new_server,
