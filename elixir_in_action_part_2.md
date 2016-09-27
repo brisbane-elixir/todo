@@ -542,6 +542,105 @@ To make this change, we simply change `start` to `start_link` for all our proces
 Note, for `Todo.Server`, I kept both `start` and `start_link`, as we have an existing test that starts and kills a server process.
 If `start_link` is used, it brings down the test process too! This obviously cuases the test to fail.
 
+Let's try our little test again, to see if we're leaking processes.
+
+```elixir
+Todo.Supervisor.start_link
+# nil
+bobs_list = Todo.Cache.server_process("Bob's list")
+# #PID<0.161.0>
+length(:erlang.processes)
+# 88
+Process.whereis(:todo_cache) |> Process.exit(:kill)
+# true
+bobs_list = Todo.Cache.server_process("Bob's list")
+# #PID<0.184.0>
+length(:erlang.processes)
+# 88
+```
+Ah ha. We have a stable number of processes, meaning all our children processes were being cleaned up and restart properly.
+
+### Restart Frequency
+
+Let's try another quick thing in iex:
+
+```elixir
+for _ <- 1..6 do
+  Process.whereis(:todo_cache) |> Process.exit(:kill)
+  :timer.sleep(200)
+end
+```
+
+Our supervisor will only restart a process a certain number of times within a certain timeframe. The default maximum
+restart frequency is 5 times in 5 seconds. The reason behind this, is that if a process restarts too many times in a given interval,
+continually restarting it isn't going to solve the problem, and terminating itself is the only sensible thing the supervisor can do.
+This allows the supervisor to propagate the error upstream, which is often useful when you have nested hierachies of supervisors.
+
+## Isolating Error Effects
+So far, we've looked at the basic theory of error handling in concurrent systems using supervisors. The basic idea is to have
+a process whose only job is to restart other processes if they crash.
+
+Isolating error effects can have a big impact on system availability. If there is a problem with our database, we should be able continue to serve requests from the cache where possible, at least providing partial service. Taking it further, an error in a single database
+worker shouldn't affect other database operations. If we can isolate error effects to a small part of the system, our system should
+be able to provide most of it's service all of the time.
+
+In our Todo system so far, however, our recovery approach is too coarse. An error in any of our processes brings down the whole tree.
+This is primarily because we are starting workers from other workers, what we are going to introduce next is supervisors for each part
+of the system.
+
+### Separating loosely dependent parts
+First, we'll move the database server so it's started directly by the superviser. We must remove the call to `Todo.Database.start_link`
+from `Todo.Cache`, and then add another worker to our supervisor:
+
+in `lib/todo/supervisor.ex`
+```elixir
+  def init(_) do
+    processes = [
+      worker(Todo.Cache, []),
+      worker(Todo.Database, ["./database"])
+    ]
+    supervise(processes, strategy: :one_for_one)
+  end
+```
+
+Now, our Database and Cache are restarted independently - If an error occurs in a Database worker, clients can continue to
+use the cache while it is restarting. By adding some `puts` statements when our process start, we can try it in iex:
+
+```elixir
+Todo.Supervisor.start_link
+# Starting to-do cache.
+# Starting database server.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+
+Process.whereis(:database_server) |> Process.exit(:kill)
+# Starting database server.
+# true
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# Starting database worker.
+# {:ok, #PID<0.263.0>
+```
+
+Note, the todo cache is not restarted when we kill the database server.
+
 
 
 

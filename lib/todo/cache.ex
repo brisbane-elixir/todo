@@ -3,7 +3,6 @@ defmodule Todo.Cache do
   alias Todo.{Database, Server}
 
   def init(_) do
-    Database.start_link("./database")
     {:ok, Map.new}
   end
 
