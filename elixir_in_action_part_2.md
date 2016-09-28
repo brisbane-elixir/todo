@@ -2,6 +2,7 @@
 
 This month we'll continue our Todo application we started in [part 1](./elixir_in_action_part_1.md)
 
+
 ## Managing multiple Todo lists
 
 Let's recap what we built last time. We have:
@@ -604,7 +605,7 @@ in `lib/todo/supervisor.ex`
 ```
 
 Now, our Database and Cache are restarted independently - If an error occurs in a Database worker, clients can continue to
-use the cache while it is restarting. By adding some `puts` statements when our process start, we can try it in iex:
+use the cache while it is restarting. By adding some `puts` statements when our processes start, we can try it in iex:
 
 ```elixir
 Todo.Supervisor.start_link
@@ -641,6 +642,40 @@ Process.whereis(:database_server) |> Process.exit(:kill)
 
 Note, the todo cache is not restarted when we kill the database server.
 
+## Rich process discovery
 
+So, we have basic error isolation, but it still leaves a lot to be desired. If one of our database workers crashes, it will
+bring down all of them. What we need is to have each database worker directly supervised. There is a problem, however, recall that
+our database server currently stores a Map of worker pids. A property of the supervisor pattern is that you can't hold onto the pid
+of another process for a long time, because that process may die and be restarted with a new pid. We need a way to lookup pids
+for database workers, using a symbolic name.
 
+We could use registered aliases for this, as we have for the database server etc, but these only allow atoms as process names. What
+we want to be able to lookup processes by something more elaborate, e.g. `{:database_worker, 1}`. 
 
+Note, we could dynamically generate atoms like `:database_worker_1`, but this is not generally a good practice due to garbage
+collection properties of atoms (they are never garbage collected).
+
+We're going to introduce a Process Registry component that allows process aliases to be arbitrarily complex.
+
+Note, in a real project you don't need to build this yourself. We're doing this for demonstration purposes to understand more
+about how processes work. There are great 3rd party libraries, such as gproc that provide this and more functionality.
+
+We're going to add a new server process, via a `Todo.ProcessRegistry` module. The module will have
+ - `ProcessRegistry.register_name`
+ - `ProcessRegistry.whereis_name`
+functions. These are going to conform to a specific convention with will allow us to use a GenServer feature 'via tuples`.
+
+### Via Tuples
+Via tuples allow us to combine our custom process registry with the existing GenServer behaviour. A via tuple is a tuple of
+the form `{:via, module, alias}` which we can send to GenServer functions such as `start_link`, `call` and `cast`, that
+instruct it to delegate process discovery to our custom module. e.g.:
+
+```elixir
+GenServer.call(
+{:via, Todo.ProcessRegistry, {:database_worker}, 1},
+{:get, key}
+)
+```
+
+Let's create our process registry. As always, let's start, with a test.
