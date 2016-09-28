@@ -1,5 +1,6 @@
 defmodule Todo.ProcessRegistry do
   use GenServer
+  import Kernel, except: [send: 2]
 
   def start_link do
     GenServer.start_link(__MODULE__, nil, [name: :todo_process_registry])
@@ -15,6 +16,14 @@ defmodule Todo.ProcessRegistry do
 
   def whereis_name(key) do
     GenServer.call(:todo_process_registry, {:whereis_name, key})
+  end
+
+  def deregister_pid(process_registry, pid) do
+    process_registry
+    |> Enum.filter(fn {key, value} ->
+      value != pid
+    end)
+    |> Enum.into(%{})
   end
 
   def handle_call({:register_name, key, pid}, _, process_registry) do
@@ -33,5 +42,18 @@ defmodule Todo.ProcessRegistry do
       Map.get(process_registry, key, :undefined),
       process_registry
     }
+  end
+
+  def handle_info({:DOWN, _, :process, pid, _}, process_registry) do
+    {:noreply, deregister_pid(process_registry, pid)}
+  end
+
+  def send(key, message) do
+    case whereis_name(key) do
+      :undefined -> {:badarg, {key, message}}
+      pid ->
+        Kernel.send(pid, message)
+        pid
+    end
   end
 end
