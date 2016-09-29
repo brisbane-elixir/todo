@@ -3,9 +3,10 @@ defmodule Todo.DatabaseWorkerTest do
   alias Todo.DatabaseWorker
 
   test "can store and retrieve values" do
-    {:ok, pid} = DatabaseWorker.start_link("database/test")
-    DatabaseWorker.store(pid, "my key", %{this_is: "anything"})
+    Todo.ProcessRegistry.start_link
+    DatabaseWorker.start_link("database/test", 1)
+    DatabaseWorker.store(1, "my key", %{this_is: "anything"})
 
-    assert DatabaseWorker.get(pid, "my key") == %{this_is: "anything"}
+    assert DatabaseWorker.get(1, "my key") == %{this_is: "anything"}
   end
 end

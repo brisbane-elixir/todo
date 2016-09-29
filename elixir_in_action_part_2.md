@@ -679,3 +679,223 @@ GenServer.call(
 ```
 
 Let's create our process registry. As always, let's start, with a test.
+
+```elixir
+defmodule Todo.ProcessRegistryTest do
+  use ExUnit.Case
+  alias Todo.ProcessRegistry
+
+  setup do
+    ProcessRegistry.start_link
+    :ok
+  end
+
+  test "can register a process" do
+    ProcessRegistry.register_name({:database_worker, 1}, self)
+    pid = Todo.ProcessRegistry.whereis_name({:database_worker, 1})
+
+    assert pid == self()
+  end
+
+  test "should remove dead processes" do
+    pid = spawn(fn -> :timer.sleep(:infinity) end)
+    ProcessRegistry.register_name({:dead_man_walking}, pid)
+    assert ProcessRegistry.whereis_name({:dead_man_walking}) == pid
+
+    Process.exit(pid, :kill)
+    :timer.sleep(100)
+
+    assert ProcessRegistry.whereis_name({:dead_man_walking}) == :undefined
+  end
+
+  test "can use with via tuples" do
+    via_tuple = {:via, Todo.ProcessRegistry, {:database_worker, 1}}
+    GenServer.start_link(Todo.DatabaseWorker, "database/viatest", name: via_tuple)
+    GenServer.cast(via_tuple, {:store, "somekey", :some_data})
+    :timer.sleep(100)
+    value = GenServer.call(via_tuple, {:get, "somekey"})
+
+    assert value == :some_data
+  end
+end
+```
+
+And here is our implementation. It is pretty much a rehash of concepts we've seen before.
+
+```elixir
+defmodule Todo.ProcessRegistry do
+  use GenServer
+  import Kernel, except: [send: 2]
+
+  def start_link do
+    GenServer.start_link(__MODULE__, nil, [name: :todo_process_registry])
+  end
+
+  def init(_) do
+    {:ok, %{}}
+  end
+
+  def register_name(key, pid) do
+    GenServer.call(:todo_process_registry, {:register_name, key, pid})
+  end
+
+  def whereis_name(key) do
+    GenServer.call(:todo_process_registry, {:whereis_name, key})
+  end
+
+  def deregister_pid(process_registry, pid) do
+    process_registry
+    |> Enum.filter(fn {key, value} ->
+      value != pid
+    end)
+    |> Enum.into(%{})
+  end
+
+  def handle_call({:register_name, key, pid}, _, process_registry) do
+    case Map.get(process_registry, key) do
+      nil ->
+        Process.monitor(pid)
+        {:reply, :yes, Map.put(process_registry, key, pid)}
+      _ ->
+        {:reply, :no, process_registry}
+    end
+  end
+
+  def handle_call({:whereis_name, key}, _, process_registry) do
+    {
+      :reply,
+      Map.get(process_registry, key, :undefined),
+      process_registry
+    }
+  end
+
+  def handle_info({:DOWN, _, :process, pid, _}, process_registry) do
+    {:noreply, deregister_pid(process_registry, pid)}
+  end
+
+  def send(key, message) do
+    case whereis_name(key) do
+      :undefined -> {:badarg, {key, message}}
+      pid ->
+        Kernel.send(pid, message)
+        pid
+    end
+  end
+end
+```
+
+A couple of things to note. The `handle_info` function allows us to handle messages from our monitored process, to handle them dying. 
+Our `send` function is something we have to provide to allow via tuples for GenServer.
+
+Let's use our new registry to properly supervise our database workers. We need to:
+ - Have each database worker register with our process registry
+ - Use the registry to discover workers
+ - Create a supervisor to supervise the pool of workers.
+ 
+To do that, we just use via tuples, as we did in our test.
+
+in `lib/todo/database_worker.ex`
+```elixir
+def start_link(db_folder, worker_id) do
+  IO.puts "Starting the database worker #{worker_id}"
+  GenServer.start_link(__MODULE__, db_folder, name: via_tuple(worker_id))
+end
+
+defp via_tuple(worker_id) do
+    {:via, Todo.ProcessRegistry, {:database_worker, worker_id}}
+end
+
+def store(worker_id, key, data) do
+  GenServer.cast(via_tuple(worker_id), {:store, key, data})
+end
+
+def get(worker_id, key) do
+  GenServer.call(via_tuple(worker_id), {:get, key})
+end
+```
+(replace existing `store` and `get` implementations)
+
+Now, we could add our workers under the existing supervisor, but in order to isolate the database component of our system,
+we're going to add them under their own supervisor.
+
+in `lib/todo/pool_supervisor.ex`
+```elixir
+defmodule Todo.PoolSupervisor do
+  use Supervisor
+
+ def start_link(db_folder, pool_size) do
+    Supervisor.start_link(__MODULE__, {db_folder, pool_size})
+  end
+
+  def init({db_folder, pool_size}) do
+    processes = for worker_id <- 1..pool_size do
+      worker(
+        Todo.DatabaseWorker, [db_folder, worker_id],
+        id: {:database_worker, worker_id}
+      )
+    end
+    supervise(processes, strategy: :one_for_one)
+  end
+end
+```
+
+### Removing the database process
+
+Now that we have our process registry, don't actually need our database server - there is no more state to keep!
+We'll simplify it to delegate to the pool supervisor and process registry.
+
+in `lib/todo/database.ex`
+```elixir
+defmodule Todo.Database do
+  @pool_size 3
+
+  def start_link(db_folder) do
+    Todo.PoolSupervisor.start_link(db_folder, @pool_size)
+  end
+
+  def store(key, data) do
+    key
+    |> choose_worker
+    |> Todo.DatabaseWorker.store(key, data)
+  end
+
+  def get(key) do
+    key
+    |> choose_worker
+    |> Todo.DatabaseWorker.get(key)
+  end
+
+  defp choose_worker(key) do
+    :erlang.phash2(key, @pool_size) + 1
+  end
+end
+```
+
+### Starting it all up
+Now we have a few final changes to our `Todo.Supervisor`, and we should be set.
+
+```elixir
+defmodule Todo.Supervisor do
+  use Supervisor
+
+  def start_link do
+    Supervisor.start_link(__MODULE__, nil)
+  end
+
+  def init(_) do
+    processes = [
+      worker(Todo.ProcessRegistry, []),
+      supervisor(Todo.Database, ["./persist/"]),
+      worker(Todo.Cache, [])
+    ]
+    supervise(processes, strategy: :one_for_one)
+  end
+end
+```
+
+Notice the use of `superviser` instead of `worker`. This information is mostly used for hot code upgrades.
+Our database workers are now properly supervised!
+A few of our tests need updating for our new implementation - I'll leave that as an exercise for the reader!
+Note, there are still improvements we can make to our
+supervision tree, but we'll build on this next time.
+
