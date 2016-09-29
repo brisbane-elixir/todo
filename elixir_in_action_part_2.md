@@ -13,15 +13,15 @@ Let's recap what we built last time. We have:
  we'll introduce a new entity that we'll use to create new Todo lists and lookup existing ones. We'll call this our Todo Cache.
  
  Let's start with a test:
- in `test/todo_cache_test.exs`
-```
-defmodule TodoCacheTest do
+ in `test/todo/cache_test.exs`
+```elixir
+defmodule Todo.CacheTest do
   use ExUnit.Case
 
   test "can retrieve a server process from the cache" do
-    {:ok, cache} = TodoCache.start
-    pid = TodoCache.server_process(cache, "Bob's List")
-    retrieved = TodoCache.server_process(cache, "Bob's List")
+    {:ok, cache} = Todo.Cache.start
+    pid = Todo.Cache.server_process(cache, "Bob's List")
+    retrieved = Todo.Cache.server_process(cache, "Bob's List")
 
     assert pid == retrieved
   end
@@ -29,11 +29,11 @@ end
 ``` 
 We expect that if we ask for a server process twice, we get the same pid back.
 
-Now, the implementation. So far, nothing too new from what we have done before, basically our cache creates a new TodoServer for a given
+Now, the implementation. So far, nothing too new from what we have done before, basically our cache creates a new Todo.Server for a given
 name, or it returns the existing one. It's state is a simple `Map`.
 
-```
-defmodule TodoCache do
+```elixir    
+defmodule Todo.Cache do
   use GenServer
 
   def init(_) do
@@ -53,7 +53,7 @@ defmodule TodoCache do
       {:ok, todo_server} ->
         {:reply, todo_server, todo_servers}
       :error ->
-        {:ok, new_server} = TodoServer.start
+        {:ok, new_server} = Todo.Server.start
         {
           :reply,
           new_server,
@@ -65,17 +65,17 @@ end
 ```
 
 We'll also ensure we can start multiple todo server processes:
-```
+```elixir
   test "can start multiple server processes" do
-    {:ok, cache} = TodoCache.start
-    pid_1 = TodoCache.server_process(cache, "Bob's List")
-    pid_2 = TodoCache.server_process(cache, "Alice's List")
+    {:ok, cache} = Todo.Cache.start
+    pid_1 = Todo.Cache.server_process(cache, "Bob's List")
+    pid_2 = Todo.Cache.server_process(cache, "Alice's List")
 
     assert pid_1 != pid_2
   end
 ```
 And that pids we get back are Todo servers we can manipulate:
-```
+```elixir
   test "returned pid is a todo list" do
     {:ok, cache} = todocache.start
     bobs_list = todocache.server_process(cache, "bob's list")
@@ -90,11 +90,11 @@ And ensure everything still passes.
 Just for fun, let's prove that we can create a lot todo list processes without breaking a sweat. In iex, let's do:
 
 ```elixir
-{:ok, cache} = TodoCache.start
+{:ok, cache} = Todo.Cache.start
 length(:erlang.processes)
 1..100_000 |>
   Enum.each(fn(index) ->
-    TodoCache.server_process(cache, "to-do list #{index}")
+    Todo.Cache.server_process(cache, "to-do list #{index}")
   end)
 length(:erlang.processes)
 ```
@@ -125,10 +125,10 @@ defmodule DatabaseTest do
   use ExUnit.Case
 
   test "can store and retrieve values" do
-    TodoDatabase.start("database/test")
-    TodoDatabase.store("my key", %{this_is: "anything"})
+    Todo.Database.start("database/test")
+    Todo.Database.store("my key", %{this_is: "anything"})
 
-    assert TodoDatabase.get("my key") == %{this_is: "anything"}
+    assert Todo.Database.get("my key") == %{this_is: "anything"}
   end
 end
 ```
@@ -136,20 +136,20 @@ end
 Simple, but enough for now. Perhaps we could do more to ensure it is actually peristed to disk, e.g. kill the process then try
 our `get`. We'll do that in the next test, which tests a Todo Server persists its data.
 
-In `test/todo_server_test.exs`:
+In `test/todo/server_test.exs`:
 
 ```elixir
   test "should persist entries", %{todo_server: todo_server} do
-    TodoServer.add_entry(todo_server,
+    Todo.Server.add_entry(todo_server,
       %{date: {2016, 9, 22}, title: "Elixir Meetup"})
 
     :timer.sleep(500)
     Process.exit(todo_server, :kill)
 
-    {:ok, todo_server2} = TodoServer.start("myserver")
+    {:ok, todo_server2} = Todo.Server.start("myserver")
 
     assert todo_server != todo_server2
-    assert TodoServer.entries(todo_server2, {2016,9,22}) ==
+    assert Todo.Server.entries(todo_server2, {2016,9,22}) ==
       [%{id: 1, date: {2016, 9, 22}, title: "Elixir Meetup"}]
   end
 ```
@@ -157,9 +157,9 @@ You'll notice I now expect some context passed in to my test, I added a `setup` 
 existing test:
 ```elixir
   setup do
-    TodoDatabase.start("./database/test")
-    {:ok, todo_server} = TodoServer.start("myserver")
-    :ok = TodoServer.clear(todo_server)
+    Todo.Database.start("./database/test")
+    {:ok, todo_server} = Todo.Server.start("myserver")
+    :ok = Todo.Server.clear(todo_server)
 
     %{todo_server: todo_server}
   end
@@ -167,20 +167,20 @@ existing test:
 First, our server expects the database process to be started. We'll look at better ways to do this when we look at supervision,
 but for now, it'll suffice to start it directly whereever convenient.
 
-Second, we've added a parameter to `TodoServer.start`, so that it has a name it can use to persist the data under. Update the existing test use the context from the setup too.
+Second, we've added a parameter to `Todo.Server.start`, so that it has a name it can use to persist the data under. Update the existing test use the context from the setup too.
 
 You'll notice a `:timer.sleep` call in there. Why is it there? Because our `add_entry` call is asynchronous, if we put that
-message in the mailbox of the TodoServer, and immediately kill it, it may never be processed. For the purposes of this test, we want
+message in the mailbox of the Todo.Server, and immediately kill it, it may never be processed. For the purposes of this test, we want
 to ensure the entry is written to disk, to that when we start another server with the same name, we can check it has read it.
 
 Further to this, in order to have reproducable tests, we needed a way to clear our database. Otherwise, a second test run would append to our existing entry list, and it would contain more entries than we expect.
 
-To implement the clear functionality, this is what I added to TodoServer:
-In `lib/todo_server.ex`:
+To implement the clear functionality, this is what I added to Todo.Server:
+In `lib/todo/server.ex`:
 ```elixir
   def handle_call(:clear, _, {name, todo_list}) do
     todo_list = TodoList.new
-    TodoDatabase.store(name, todo_list)
+    Todo.Database.store(name, todo_list)
     {:reply, :ok, {name, todo_list}}
   end
 
@@ -189,16 +189,16 @@ In `lib/todo_server.ex`:
   end
 ```
 
-I also add a `TodoServer.clear` call in the `TodoCacheTest`, which otherwise will keep appending to a list every run.
+I also add a `Todo.Server.clear` call in the `Todo.CacheTest`, which otherwise will keep appending to a list every run.
 
-If we run our tests now, we'll find there are a few things we need to fix. Here are some things to change in `TodoServer`:
+If we run our tests now, we'll find there are a few things we need to fix. Here are some things to change in `Todo.Server`:
 
 Use the new parameter to persist the data on an `add_entry` call.
 
 ```elixir
   def handle_cast({:add_entry, new_entry}, {name, todo_list}) do
     todo_list = TodoList.add_entry(todo_list, new_entry)
-    TodoDatabase.store(name, todo_list)
+    Todo.Database.store(name, todo_list)
     {:noreply, {name, todo_list}}
   end
 ```
@@ -210,18 +210,18 @@ The `init` function also reads the database to get existing state from disk. If 
 
 ```elixir
   def init(name) do
-    {:ok, {name, TodoDatabase.get(name) || TodoList.new}}
+    {:ok, {name, Todo.Database.get(name) || TodoList.new}}
   end
 ```
 
-You'll also find that the `TodoCache` test is failing, because the `TodoServer` expects the database to already have been started.
+You'll also find that the `Todo.Cache` test is failing, because the `Todo.Server` expects the database to already have been started.
 For now, we'll add a very hacky solution of starting the database when the cache starts, in it's `init` function:
 
-In `lib/todo_cache.ex`:
+In `lib/todo/cache.ex`:
 
 ```elixir
   def init(_) do
-    TodoDatabase.start("./database")
+    Todo.Database.start("./database")
     {:ok, Map.new}
   end
 ```
@@ -238,15 +238,15 @@ filesystem access.
 ![Process dependencies](./elixir_in_action_images/todo-server-processes-2.png)
 
 Let's look at where we call our database process:
- - In `TodoServer.init`, we do `TodoDatabase.get` to load state from disk.
- - In the `handle_cast` for `TodoServer.add_entry`, we do a `TodoDatabase.store`.
+ - In `Todo.Server.init`, we do `Todo.Database.get` to load state from disk.
+ - In the `handle_cast` for `Todo.Server.add_entry`, we do a `Todo.Database.store`.
  
 The `store` call might seem harmless, since it's in an asynchronous cast. A client issues the request and continues on it's merry
 way without blocking. However, if requests arrive faster than they can be handled, the message queue for the Database will grow until
 eventually we run out of memory and possibly crash the BEAM.
 
-The `get` call is also problematic. It's synchronous, so the `TodoServer` waits for the response. While it's waiting, that `TodoServer`
-can't handle new messages. What is worse, however, is that because this is happening inside `init`, our single `TodoCache` process
+The `get` call is also problematic. It's synchronous, so the `Todo.Server` waits for the response. While it's waiting, that `Todo.Server`
+can't handle new messages. What is worse, however, is that because this is happening inside `init`, our single `Todo.Cache` process
 is blocked while the filesystem is read. Under a heavier load, this could render our system useless.
 
 ## Addressing the bottleneck
@@ -276,11 +276,11 @@ There are great existing libraries in elixir/erlang (e.g. poolboy), and you don'
 
 ## Database Pooling
 To introduce database pooling, here are the steps we'll take:
- - Introduce `TodoDatabaseWorker`, similar to existing `TodoDatabase` but not registered under global alias.
- - During `TodoDatabase` initialisation, start N workers, store their pids in a Map.
- - `TodoDatabase.get_worker` returns a pid for a given key. Use `:erlang.phash2(key, n)` to calculate numberical hash
+ - Introduce `Todo.DatabaseWorker`, similar to existing `Todo.Database` but not registered under global alias.
+ - During `Todo.Database` initialisation, start N workers, store their pids in a Map.
+ - `Todo.Database.get_worker` returns a pid for a given key. Use `:erlang.phash2(key, n)` to calculate numberical hash
  and normalise to relevant range.
- - `store` and `get` of `TodoDatabase` obtain a workers `pid` and forward to interface functions of `DatabaseWorker`
+ - `store` and `get` of `Todo.Database` obtain a workers `pid` and forward to interface functions of `DatabaseWorker`
  
  First, I'll write a test for our database worker. It's similar to our existing database module, but expects a `pid` to be passed
  to it's functions, since we have more than one.
