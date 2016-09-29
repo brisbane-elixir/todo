@@ -16,11 +16,12 @@ Let's recap what we built last time. We have:
 ```elixir
 defmodule Todo.CacheTest do
   use ExUnit.Case
+  alias Todo.Cache
 
   test "can retrieve a server process from the cache" do
-    {:ok, cache} = Todo.Cache.start
-    pid = Todo.Cache.server_process(cache, "Bob's List")
-    retrieved = Todo.Cache.server_process(cache, "Bob's List")
+    {:ok, cache} = Cache.start
+    pid = Cache.server_process(cache, "Bob's List")
+    retrieved = Cache.server_process(cache, "Bob's List")
 
     assert pid == retrieved
   end
@@ -34,6 +35,7 @@ name, or it returns the existing one. It's state is a simple `Map`.
 ```elixir    
 defmodule Todo.Cache do
   use GenServer
+  alias Todo.Server
 
   def init(_) do
     {:ok, Map.new}
@@ -52,7 +54,7 @@ defmodule Todo.Cache do
       {:ok, todo_server} ->
         {:reply, todo_server, todo_servers}
       :error ->
-        {:ok, new_server} = Todo.Server.start
+        {:ok, new_server} = Server.start
         {
           :reply,
           new_server,
@@ -66,9 +68,9 @@ end
 We'll also ensure we can start multiple todo server processes:
 ```elixir
   test "can start multiple server processes" do
-    {:ok, cache} = Todo.Cache.start
-    pid_1 = Todo.Cache.server_process(cache, "Bob's List")
-    pid_2 = Todo.Cache.server_process(cache, "Alice's List")
+    {:ok, cache} = Cache.start
+    pid_1 = Cache.server_process(cache, "Bob's List")
+    pid_2 = Cache.server_process(cache, "Alice's List")
 
     assert pid_1 != pid_2
   end
@@ -76,17 +78,17 @@ We'll also ensure we can start multiple todo server processes:
 And that pids we get back are Todo servers we can manipulate:
 ```elixir
   test "returned pid is a todo list" do
-    {:ok, cache} = todocache.start
-    bobs_list = todocache.server_process(cache, "bob's list")
+    {:ok, cache} = Cache.start
+    bobs_list = Cache.server_process(cache, "bob's list")
     entry = %{date: {2016, 10, 01}, title: "dentist"}
-    todoserver.add_entry(bobs_list, entry)
+    Server.add_entry(bobs_list, entry)
 
-    assert todoserver.entries(bobs_list, {2016, 10, 01}) == [map.put(entry, :id, 1)]
+    assert Server.entries(bobs_list, {2016, 10, 01}) == [map.put(entry, :id, 1)]
   end
 ```
 And ensure everything still passes.
 
-Just for fun, let's prove that we can create a lot todo list processes without breaking a sweat. In iex, let's do:
+Just for fun, let's prove that we can create a lot of todo list processes without breaking a sweat. In iex, let's do:
 
 ```elixir
 {:ok, cache} = Todo.Cache.start
@@ -120,8 +122,9 @@ So, we'll introduce a `Database` service, that has `store` and `get` functions. 
 In `test/database_test.exs`:
 
 ```elixir
-defmodule DatabaseTest do
+defmodule Todo.DatabaseTest do
   use ExUnit.Case
+  alias Todo.Database
 
   test "can store and retrieve values" do
     Todo.Database.start("database/test")
