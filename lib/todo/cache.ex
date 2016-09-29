@@ -1,5 +1,6 @@
-defmodule TodoCache do
+defmodule Todo.Cache do
   use GenServer
+  alias Todo.Server
 
   def init(_) do
     {:ok, Map.new}
@@ -18,7 +19,7 @@ defmodule TodoCache do
       {:ok, todo_server} ->
         {:reply, todo_server, todo_servers}
       :error ->
-        {:ok, new_server} = TodoServer.start
+        {:ok, new_server} = Server.start
         {
           :reply,
           new_server,
