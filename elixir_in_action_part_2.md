@@ -119,7 +119,7 @@ Let's do some persistence. To keep things simple, we're just going to write it l
 servers in production, writing locally to disk isn't going to cut it, but it serves our purpose for exploring processes right now.
 
 So, we'll introduce a `Database` service, that has `store` and `get` functions. Here is a test:
-In `test/database_test.exs`:
+In `test/todo/database_test.exs`:
 
 ```elixir
 defmodule Todo.DatabaseTest do
@@ -127,10 +127,10 @@ defmodule Todo.DatabaseTest do
   alias Todo.Database
 
   test "can store and retrieve values" do
-    Todo.Database.start("database/test")
-    Todo.Database.store("my key", %{this_is: "anything"})
+    Database.start("database/test")
+    Database.store("my key", %{this_is: "anything"})
 
-    assert Todo.Database.get("my key") == %{this_is: "anything"}
+    assert Database.get("my key") == %{this_is: "anything"}
   end
 end
 ```
@@ -142,7 +142,7 @@ In `test/todo/server_test.exs`:
 
 ```elixir
   test "should persist entries", %{todo_server: todo_server} do
-    Todo.Server.add_entry(todo_server,
+    Server.add_entry(todo_server,
       %{date: {2016, 9, 22}, title: "Elixir Meetup"})
 
     :timer.sleep(500)
@@ -151,7 +151,7 @@ In `test/todo/server_test.exs`:
     {:ok, todo_server2} = Todo.Server.start("myserver")
 
     assert todo_server != todo_server2
-    assert Todo.Server.entries(todo_server2, {2016,9,22}) ==
+    assert Server.entries(todo_server2, {2016,9,22}) ==
       [%{id: 1, date: {2016, 9, 22}, title: "Elixir Meetup"}]
   end
 ```
@@ -159,9 +159,9 @@ You'll notice I now expect some context passed in to my test, I added a `setup` 
 existing test:
 ```elixir
   setup do
-    Todo.Database.start("./database/test")
-    {:ok, todo_server} = Todo.Server.start("myserver")
-    :ok = Todo.Server.clear(todo_server)
+    Database.start("./database/test")
+    {:ok, todo_server} = Server.start("myserver")
+    :ok = Server.clear(todo_server)
 
     %{todo_server: todo_server}
   end
@@ -182,7 +182,7 @@ In `lib/todo/server.ex`:
 ```elixir
   def handle_call(:clear, _, {name, todo_list}) do
     todo_list = TodoList.new
-    Todo.Database.store(name, todo_list)
+    Database.store(name, todo_list)
     {:reply, :ok, {name, todo_list}}
   end
 
@@ -200,7 +200,7 @@ Use the new parameter to persist the data on an `add_entry` call.
 ```elixir
   def handle_cast({:add_entry, new_entry}, {name, todo_list}) do
     todo_list = TodoList.add_entry(todo_list, new_entry)
-    Todo.Database.store(name, todo_list)
+    Database.store(name, todo_list)
     {:noreply, {name, todo_list}}
   end
 ```
@@ -223,7 +223,7 @@ In `lib/todo/cache.ex`:
 
 ```elixir
   def init(_) do
-    Todo.Database.start("./database")
+    Database.start("./database")
     {:ok, Map.new}
   end
 ```
@@ -280,7 +280,7 @@ There are great existing libraries in elixir/erlang (e.g. poolboy), and you don'
 To introduce database pooling, here are the steps we'll take:
  - Introduce `Todo.DatabaseWorker`, similar to existing `Todo.Database` but not registered under global alias.
  - During `Todo.Database` initialisation, start N workers, store their pids in a Map.
- - `Todo.Database.get_worker` returns a pid for a given key. Use `:erlang.phash2(key, n)` to calculate numberical hash
+ - `Todo.Database.get_worker` returns a pid for a given key. Use `:erlang.phash2(key, n)` to calculate numerical hash
  and normalise to relevant range.
  - `store` and `get` of `Todo.Database` obtain a workers `pid` and forward to interface functions of `DatabaseWorker`
  
@@ -592,7 +592,7 @@ This is primarily because we are starting workers from other workers, what we ar
 of the system.
 
 ### Separating loosely dependent parts
-First, we'll move the database server so it's started directly by the superviser. We must remove the call to `Todo.Database.start_link`
+First, we'll move the database server so it's started directly by the supervisor. We must remove the call to `Todo.Database.start_link`
 from `Todo.Cache`, and then add another worker to our supervisor:
 
 in `lib/todo/supervisor.ex`
@@ -895,7 +895,7 @@ defmodule Todo.Supervisor do
 end
 ```
 
-Notice the use of `superviser` instead of `worker`. This information is mostly used for hot code upgrades.
+Notice the use of `supervisor` instead of `worker`. This information is mostly used for hot code upgrades.
 Our database workers are now properly supervised!
 A few of our tests need updating for our new implementation - I'll leave that as an exercise for the reader!
 Note, there are still improvements we can make to our
