@@ -17,4 +17,4 @@ erl_crash.dump
 *.ez
 
 # Where we write the database files
-/database
+/persist

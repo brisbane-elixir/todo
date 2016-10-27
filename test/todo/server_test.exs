@@ -1,11 +1,15 @@
 defmodule Todo.ServerTest do
   use ExUnit.Case
-  alias Todo.{Server, Database}
+  alias Todo.{Server, Database, Supervisor}
 
   setup do
-    Database.start_link("./database/test")
+    {:ok, supervisor} = Supervisor.start_link()
     {:ok, todo_server} = Server.start("myserver")
     :ok = Server.clear(todo_server)
+
+    on_exit fn ->
+      Process.exit(supervisor, :kill)
+    end
 
     %{todo_server: todo_server}
   end
