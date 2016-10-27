@@ -5,7 +5,8 @@ https://www.manning.com/books/elixir-in-action
 
 We'll work through the material over several meetups:
  - 2016-08-04: [Part 1](./elixir_in_action_part_1.md)
- - 2016-08-04: [Part 1](./elixir_in_action_part_2.md)
+ - 2016-09-29: [Part 2](./elixir_in_action_part_2.md)
+ - 2016-11-03: [Part 3](./elixir_in_action_part_3.md)
 
 We'll work through the hands-on excerises from this book, would build a ToDo server application.
 The concept of the application is simple enough. The basic version of the to-do list will support the following features:
