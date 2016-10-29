@@ -127,3 +127,63 @@ bobs_list = Todo.Cache.server_process("Bob's list")
 Process.exit(bobs_list, :kill)
 Todo.Cache.server_process("Bob's list")
 ```
+
+Our error handling and recovery still isn't quite right. Let's try this:
+
+```elixir
+Process.whereis(:todo_process_registry) |> Process.exit(:kill)
+Todo.Cache.server_process("Bob's list")
+```
+
+Basically, if our registry process dies, everything is screwed. A new one is started by the supervisor...but it has a clean state. Anything that tries to look something it expects to exist, gets an error.
+
+What can we do?
+
+Our registry is a critical part of our system - without it our system can't function, and it's state is not easy to recover in a simple and consistent way. Critical processes at the heart of system are often called the "error kernel".
+
+The best thing we can do in our situation is to force the rest of the system to restart and come up in a clean state. If the rest of the system crashes, we should leave the registry alone, however.
+
+### Rest for one supervisor
+Here is the final superision tree we will implement:
+![Supervision Tree](./elixir_in_action_images/rest_for_one_supervision_tree.png)
+
+We introduce another level into our supervision tree, adding a `SystemSupervisor` for components other than the registry. With a `one_for_one` strategy, with allows each of those to totally independent.
+
+```elixir
+defmodule Todo.SystemSupervisor do
+  use Supervisor
+
+  def start_link do
+    Supervisor.start_link(__MODULE__, nil)
+  end
+
+  def init(_) do
+    processes = [
+      supervisor(Todo.Database, ["./persist/"]),
+      supervisor(Todo.ServerSupervisor, []),
+      worker(Todo.Cache, [])
+    ]
+    supervise(processes, strategy: :one_for_one)
+  end
+end
+```
+
+Our top level supervisor, then, uses `rest_for_one` to unsure the rest of the system is restarted if the registry dies.
+```elixir
+defmodule Todo.Supervisor do
+  use Supervisor
+
+  def start_link do
+    Supervisor.start_link(__MODULE__, nil)
+  end
+
+  def init(_) do
+    processes = [
+      worker(Todo.ProcessRegistry, []),
+      supervisor(Todo.SystemSupervisor, [])
+    ]
+    supervise(processes, strategy: :rest_for_one)
+  end
+end
+```
+ Let's try our example again and prove that the system still functions!

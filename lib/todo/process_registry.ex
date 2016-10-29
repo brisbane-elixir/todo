@@ -3,6 +3,7 @@ defmodule Todo.ProcessRegistry do
   import Kernel, except: [send: 2]
 
   def start_link do
+    IO.puts("Starting process registry")
     GenServer.start_link(__MODULE__, nil, [name: :todo_process_registry])
   end
 
