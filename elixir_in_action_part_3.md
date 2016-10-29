@@ -48,6 +48,15 @@ A couple of differences to our previous one.
  - We make the supervisor register locally under an alias, so we an easily use it to start children
  - In init, we still provide a child specification, and a list predefined args. When we start a child we can specify additional args that are appended to this list.
  
+We'll also want this to be started as a child of our top level supervisor:
+
+in `lib/todo/supervisor.ex`
+```elixir
+      ...
+      supervisor(Todo.ServerSupervisor, []),
+      ... 
+```
+ 
 With this in place, we need to make our Todo Server register itself on start with our Process Registry. 
 
 ```elixir
@@ -70,7 +79,51 @@ defmodule Todo.Server do
 end
 ```
 
-Now that our server processes add themselves to the process registry, we don't actually need to store them in the cache. Let's update our cache to:
+Now that our server processes add themselves to the process registry, we don't actually need to store them in the cache.
+We do need to be careful, however, to avoid a particular race condition. Suppose two clients ask to the same list at the same time, we only want one process created for the list.
+Let's update our cache to:
  # In the client process check whether a server process exists, and return it if so.
  # Other wise, call in to the Todo Cache process.
  # In the cache process, recheck if the process exists, and return it if so.
+ # Otherwise, in the Todo Cache process create the process via our new Server Supervisor.
+ 
+ This ensures that clients that multiple requests for the same list will result in only one process, and other clients will wait for the process to be created. Requests for existing processes however, don't even enter the Cache Process.
+ 
+Here is a new implementation of the our `server_process/1` function (and it's callback).
+ ```elixir
+  def server_process(todo_list_name) do
+    case Server.whereis(todo_list_name) do
+      pid when is_pid(pid) -> pid
+      :undefined -> GenServer.call(:todo_cache, {:server_process, todo_list_name})
+    end
+  end
+
+  def handle_call({:server_process, todo_list_name}, _, _) do
+    case Server.whereis(todo_list_name) do
+      pid when is_pid(pid) -> pid
+      :undefined -> ServerSupervisor.start_child(todo_list_name)
+    end
+  end
+ ```
+ 
+ I also updated the `cache_test` setup to be:
+ ```elixir
+  setup_all do
+    {:ok, pid} = Todo.Supervisor.start_link
+
+    on_exit fn -> 
+      Process.exit(pid, :normal)
+    end
+
+    :ok
+  end
+ ```
+ 
+ Let's play with it in iex to see how our todo servers are now supervised:
+ 
+```elixir
+Todo.Supervisor.start_link
+bobs_list = Todo.Cache.server_process("Bob's list")
+Process.exit(bobs_list, :kill)
+Todo.Cache.server_process("Bob's list")
+```

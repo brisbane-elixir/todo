@@ -2,11 +2,11 @@ defmodule Todo.CacheTest do
   use ExUnit.Case
   alias Todo.{Cache, Server}
 
-  setup do
+  setup_all do
     {:ok, pid} = Todo.Supervisor.start_link
 
     on_exit fn -> 
-      Process.exit(pid, :kill)
+      Process.exit(pid, :normal)
     end
 
     :ok
