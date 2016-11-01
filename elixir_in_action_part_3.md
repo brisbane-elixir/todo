@@ -187,3 +187,146 @@ defmodule Todo.Supervisor do
 end
 ```
  Let's try our example again and prove that the system still functions!
+ 
+# Sharing State
+We've been using processes along the way to manage state - and this is one of the most important reasons to reach for processes in elixir. However, if the state must be shared by multiple client, the single server process may become a bottleneck.
+ 
+Our Todo Cache is pretty key to our system - every request that comes in is going to ask it for a new or existing todo list. Let's benchmark how this component in our system performs under load.
+
+## Performance testing our cache
+Let's see how many requests for cache can handle per second. Sasa profided a handly profiler module with the book. I also looked into other elixir tools like benchfella (which didn't seem to support concurrency) and blitzy (which is more about HTTP testing). Here is slightly modified version of Sasa'a profiler:
+
+`lib/profiler.ex`
+```elxixir
+defmodule Profiler do
+  def run(function, operations_count, concurrency_level \\ 1) do
+    time = execution_time(
+      function,
+      operations_count,
+      concurrency_level
+    )
+
+    projected_rate = round(1000000 * operations_count * concurrency_level / time)
+    IO.puts "#{projected_rate} reqs/sec\n"
+  end
+
+  defp execution_time(fun, operations_count, concurrency_level) do
+    # We measure the execution time of the entire operation
+    {time, _} = :timer.tc(fn ->
+      me = self
+
+      # Spawn client processes
+      for _ <- 1..concurrency_level do
+        spawn(fn ->
+          # Execute the function in the client process
+          for _ <- 1..operations_count, do: fun.()
+
+          # Notify the master process that we've done
+          send(me, :computed)
+        end)
+      end
+
+      # In the master process, we await all :computed messages from all processes.
+      for _ <- 1..concurrency_level do
+        receive do
+          :computed -> :ok
+        end
+      end
+    end)
+
+    time # [microseconds]
+  end
+end
+```
+
+let's create a simple script to run the profiler on our cache.
+
+`perf/cache_perf_test.exs`
+```elixir
+alias Todo.{Cache, Supervisor}
+
+Supervisor.start_link
+
+number_of_lists = 100
+func = fn -> Cache.server_process("list #{:rand.uniform(number_of_lists)}") end
+
+Profiler.run(func, 100000)
+```
+
+We can run this with `mix run perf/cache_perf_test.exs`.
+
+On my machine, I get a result of ~140K reqs/sec. Let's see what happens when it must serve multiple clients.
+Update the last line to be 
+```elixir
+Profiler.run(func, 100000, 100)
+```
+and run it again.
+On my system, I get around ~280K reqs/sec. These numbers may seem ok, but let's see if we can improve things with ETS.
+
+# ETS
+ETS (Erlang Term Storage) is a separate memory structure where you can store elixir/erlang terms. It allows you store system-wide state without introducing a server process. Data is stored in a table, where you insert tuples.
+
+Here are some ETS table characteristics:
+
+ - ETS tables are mutable. A write will affect subsequent reads.
+ - Multiple processes can read from or write to a table, reads and writes are concurrent.
+ - Minimum isolation is ensured. Multiple processes can write to same row - last write wins.
+ - An ETS table resides in a separate memory space. any data coming in or out is deep copied.
+ - An ETS table is connected to an 'owner process'. If the owner dies, the table is reclaimed.
+ - Other than the above, there is no garbage collection for ETS tables.
+ 
+ ETS tables can be of the following types:
+ - :set - Default. One row per distinct key is allowed.
+ - :ordered_set - Just like :set , but rows are in term order (comparison via the < and > operators)
+ - :bag - Multiple rows with the same key are allowed. But two rows can’t be completely identical.
+ - :duplicate_bag - Just like :bag, but allows duplicate rows.
+ 
+ You can also control access permissions on the table, with:
+ - :protected - Default. The owner process can read from and write to the table. All other processes can read from the table.
+ - :public - All processes can read from and write to the table.
+ - :private - Only the owner process can access the table.
+ 
+Alright. Let's what our cache would look like powered by ETS.
+
+First, we'll update the `init` function to create a table:
+
+```elixir
+  def init(_) do
+    :ets.new(:ets_todo_cache, [:set, :named_table, :protected])
+    {:ok, nil}
+  end
+```
+
+Then, instead of using our process cache to look up the todo list, we'll replace those lines with an ETS lookup:
+```elixir
+  def server_process(todo_list_name) do
+    case :ets.lookup(:ets_todo_cache, todo_list_name) do
+      [{^todo_list_name, pid}] -> pid
+      _ -> GenServer.call(:todo_cache, {:server_process, todo_list_name})
+    end
+  end
+
+  def handle_call({:server_process, todo_list_name}, _, _) do
+    pid = case :ets.lookup(:ets_todo_cache, todo_list_name) do
+      [{^todo_list_name, pid}] -> pid
+      _ ->
+        {:ok, pid} = ServerSupervisor.start_child(todo_list_name)
+        :ets.insert(:ets_todo_cache, {todo_list_name, pid})
+        pid
+    end
+
+    {:reply, pid, nil}
+  end
+```
+
+That's it. Not too big a change. Let's try our little profiler test again.
+
+Run `mix run perf/cache_perf_test.exs`.
+
+On my machine I got
+```
+1823739 reqs/sec
+```
+Nice, so that's nearly an order of magnitude performance increase, by enabling concurrent reads from our cache. This is important property to note if you have a process acting as some sort of cache in your system that is read by many clients. Another prime candidate in our Todo system would be the process registry...but we'll that one as an excerise for the reader.
+
+For a look at more features of ETS, take a look at http://erlang.org/doc/man/ets.html.

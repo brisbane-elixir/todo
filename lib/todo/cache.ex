@@ -3,6 +3,7 @@ defmodule Todo.Cache do
   alias Todo.{Server, ServerSupervisor}
 
   def init(_) do
+    :ets.new(:ets_todo_cache, [:set, :named_table, :protected])
     {:ok, nil}
   end
 
@@ -12,16 +13,19 @@ defmodule Todo.Cache do
   end
 
   def server_process(todo_list_name) do
-    case Server.whereis(todo_list_name) do
-      pid when is_pid(pid) -> pid
-      :undefined -> GenServer.call(:todo_cache, {:server_process, todo_list_name})
+    case :ets.lookup(:ets_todo_cache, todo_list_name) do
+      [{^todo_list_name, pid}] -> pid
+      _ -> GenServer.call(:todo_cache, {:server_process, todo_list_name})
     end
   end
 
   def handle_call({:server_process, todo_list_name}, _, _) do
-    {:ok, pid} = case Server.whereis(todo_list_name) do
-      pid when is_pid(pid) -> {:ok, pid}
-      :undefined -> ServerSupervisor.start_child(todo_list_name)
+    pid = case :ets.lookup(:ets_todo_cache, todo_list_name) do
+      [{^todo_list_name, pid}] -> pid
+      _ ->
+        {:ok, pid} = ServerSupervisor.start_child(todo_list_name)
+        :ets.insert(:ets_todo_cache, {todo_list_name, pid})
+        pid
     end
 
     {:reply, pid, nil}
