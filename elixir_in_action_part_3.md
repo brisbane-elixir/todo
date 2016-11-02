@@ -194,10 +194,10 @@ We've been using processes along the way to manage state - and this is one of th
 Our Todo Cache is pretty key to our system - every request that comes in is going to ask it for a new or existing todo list. Let's benchmark how this component in our system performs under load.
 
 ## Performance testing our cache
-Let's see how many requests for cache can handle per second. Sasa profided a handly profiler module with the book. I also looked into other elixir tools like benchfella (which didn't seem to support concurrency) and blitzy (which is more about HTTP testing). Here is slightly modified version of Sasa'a profiler:
+Let's see how many requests our cache can handle per second. Sasa provided a handly profiler module with the book. I also looked into other elixir tools like benchfella (which didn't seem to support concurrency) and blitzy (which is more about HTTP testing). Here is slightly modified version of Sasa'a profiler:
 
 `lib/profiler.ex`
-```elxixir
+```elixir
 defmodule Profiler do
   def run(function, operations_count, concurrency_level \\ 1) do
     time = execution_time(
